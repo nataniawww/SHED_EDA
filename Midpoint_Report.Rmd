@@ -1,0 +1,509 @@
+---
+title: "SHED Midpoint Result Report"
+author: "Natania Wong"
+date: "2024-10-02"
+header-includes: \usepackage{fvextra} \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+  \usepackage{fvextra}
+  \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+output:
+  pdf_document: default
+  latex_engine: xelatex
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Loading libraries
+library(tidyverse)
+library(dplyr)
+library(ggpubr)
+library(ggthemes)
+library(ggplot2)
+library(patchwork)
+library(broom)
+library(rlang)
+library(knitr)
+library(flextable)
+library(stringr)
+select <- gtsummary::select
+summarize <- dplyr::summarize
+opts_chunk$set(tidy.opts = list(width.cutoff = 40), tidy = TRUE)
+
+#Loading combined data from environment
+combined_SHED <- read.csv("/Users/nataniawong/Desktop/IRLE/Data/SHED - Federal Reserve/combined_SHED.csv")
+
+ncol(combined_SHED) # Number of columns in `combined_fin`
+
+# Function that rename education levels
+map_ppeduc5 <- function(x) { 
+  case_when(
+    x == "Bachelor's degree" ~ "Bachelor's degree",
+    x == "High school graduate (high school diploma or the equivalent GED)" 
+    ~ "High school graduate",
+    x == "Master’s degree or higher" ~ "Master’s degree or higher",
+    x == "Some college or Associate's degree"  ~ "Some college or Associate's degree" ,
+    x == "No high school diploma or GED" ~ "No high school diploma or GED"
+  )
+}
+
+combined_SHED$ppeduc5 = map_ppeduc5(combined_SHED$ppeduc5)
+
+# Function that rename ethnicity/ Hispanic
+map_ppethm <- function(x) { 
+  case_when(
+    x == "White, Non-Hispanic" ~ "White, Non-Hispanic",
+    x == "Hispanic" ~ "Hispanic",
+    x == "Black, Non-Hispanic" ~ "Black, Non-Hispanic",
+    x %in% c("2+ Races, Non-Hispanic", "Other, Non-Hispanic")
+    ~ "Others, Non-Hispanic"
+  )
+}
+
+combined_SHED$ppethm = map_ppethm(combined_SHED$ppethm)
+
+# Function that rename employer type
+map_ppcm1301 <- function(x) { 
+  case_when(
+    x == "Private-for-profit company" ~ "Private-for-profit company",
+    x == "Government" ~ "Government",
+    x == "Not asked" ~ "Not asked",
+    x == "Self-employed" ~ "Self-employed",
+    x == "Refused" ~ "Refused",
+    x == "Non-profit organization including tax exempt and charitable organizations"
+    ~ "NGO",
+    x == "Working in the family business" ~ "Family business"
+  )
+}
+
+combined_SHED$ppcm1301 = map_ppcm1301(combined_SHED$ppcm1301)
+
+# Function that rename home ownership
+map_pprent <- function(x) { 
+  case_when(
+    x == "Rented for cash" ~ "Rented for cash",
+    x == "Occupied without payment of cash rent" ~ "Occupied without payment of cash rent",
+    x == "Owned or being bought by you or someone in your household"
+    ~ "Owned/ Bought"
+  )
+}
+
+combined_SHED$pprent = map_pprent(combined_SHED$pprent)
+
+combined_SHED$race_5cat <- factor(combined_SHED$race_5cat,
+                                  levels = c("White", 
+                                 "Black", 
+                                 "Hispanic",
+                                 "Asian",
+                                 "Other"))
+
+combined_SHED$ppinc7 <- factor(combined_SHED$ppinc7,
+                                  levels = c("Less than $10,000", 
+                                 "$10,000 to $24,999",
+                                 "$25,000 to $49,999",
+                                 "$50,000 to $74,999",
+                                 "$75,000 to $99,999",
+                                 "$100,000 to $149,999", 
+                                 "$150,000 or more"))
+
+combined_SHED$ppinc7 <- factor(combined_SHED$ppinc7,
+                               levels = c("Under $50,000",
+                                          "$50,000 - $99,999",
+                                          "$100,000 - $249,999",
+                                          "$250,000 - $499,999",
+                                          "$500,000 - $999,999",
+                                          "$1,000,000 or more",
+                                          "Not sure"))
+
+combined_SHED <- combined_SHED %>%
+    mutate(DOV_D36_AMOUNT = recode(DOV_D36_AMOUNT, 
+                                   "decreased your pay by 1 percent" = "1%",
+                                   "decreased your pay by 5 percent" = "5%",
+                                   "decreased your pay by 10 percent" = "10%",
+                                   "kept your pay the same for a year" = "constant"))
+
+combined_SHED <- combined_SHED %>% 
+  filter(ppemploy != "Not working")
+
+# Assigning variables to respective vectors
+# Demographic Variables
+dem_var <- c("ppage", "ppgender", "ppethm", "race_5cat", "ppeduc5", 
+             "ppmarit5", "pphispan", "ppp20197", "pphi0018")
+
+# Employment Variables
+emp_var <- c("ppemploy", "ppcm1301", "ind1")
+
+# Residence/Household Variables
+res_var <- c("pphhsize", "ppreg4", "pprent", 
+             "ppkid017", "ppt18ov", "ppfs1482", "ppfs0596")
+
+# Subset dataset with variables above and Question D36B and Flag DOV_D36_AMOUNT
+subset_dat <- combined_SHED[, c(dem_var, emp_var, res_var, 
+                                "D36B", "DOV_D36_AMOUNT", "year")]
+```
+
+## Introduction
+
+The following reports the mid-point results of patterns in Survey of Household Economics and Decision-making (SHED). The main variable of interest in this report is Question D36B: How likely would you be to actively look for another job or leave your job if your employer kept your pay the same for a year / decreased your pay by 1 percent / decreased your pay by 5 percent / decreased your pay by 10 percent, where flag DOV_D36_AMOUNT indicates the percentage each person is asked (i.e. 1, 5, or 10 percent).
+
+I will be exploring the differences between various demographic and economic characteristics, i.e. age, gender, race, level of education, state/county/city of residence, yearly income, etc, to grasp a clearer understanding of whether these characteristics contribute to any difference in one's likelihood of leaving one's job. 
+
+## Data Description
+
+By downloading and importing all available survey data from 2013 to 2023 from the Federal Reserve website (https://www.federalreserve.gov/consumerscommunities/shed_data.htm), I combined the datasets into a single dataset `combined_fin`. The number of years represented in the dataset, as well as the number of observations for each year, is shown below:
+
+```{r}
+# Number of years in `combined_fin`
+cat("Number of years in `combined_fin`", unique(combined_SHED$year), "\n")
+
+# Number of variables in combined_fin
+for (yr in 2013:2023) {
+  count <- sum(combined_SHED$year == yr)
+  cat("Number of observations for year", yr, ":", count, "\n")
+}
+```
+
+It is important to note that the variable `DOV_D36_AMOUNT` indicates the percentage by which respondents were asked if their pay was decreased (i.e., 1%, 5%, or 10%). The distribution of respondents by the 1%, 5%, and 10% variants is as follows:
+
+```{r}
+combined_SHED %>%
+  group_by(DOV_D36_AMOUNT) %>%
+  tally() %>%
+  mutate(proportion = n/sum(n)) %>%
+  flextable()
+```
+
+Given the significant number of missing values (NAs) in `DOV_D36_AMOUNT`, further analysis reveals that question `D36` was only introduced in the SHED survey starting in 2021. Therefore, our analysis will focus on data from 2021 to 2023.
+
+```{r}
+unique(combined_SHED[(is.na(combined_SHED$DOV_D36_AMOUNT)),]$year)
+```
+
+The variables that provide insights into respondents' demographic and economic characteristics are categorized as follows:
+
+1. Demographic Variables:
+- ppage: Age
+- ppgender: Gender
+- ppethm: Race/Ethnicity
+- race_5cat: Race (5 categories)
+- ppeduc5: Education (5 categories)
+- ppmarit5: Marital Status
+- pphispan: Spanish, Hispanic, or Latino origin
+- ppp20197: U.S. citizenship status (QEG22)
+- pphi0018: Years lived in the United States (Q5)
+
+2. Employment Variables:
+- ppemploy: Current Employment Status
+- ppcm0160: Occupation (detailed) in current or main job (Q26)
+- ppcm1301: Employer type (GOVEMP1)
+
+3. Residence/Household Variables:
+- pphhsize: Household Size
+- ppinc7: Household Income
+- ppreg4: Region (4 regions, based on State of Residence)
+- pprent: Ownership Status of Living Quarters
+- ppkid017: Presence of Household Members (Children aged 0-17)
+- ppt18ov: Presence of Household Members (Adults aged 18+)
+- ppfs1482: Credit Score Range
+- ppfs0596: Total amount of household savings and investments
+
+## Data Cleaning
+
+Since `combined_fin` contains 1,972 columns, many of these may not be relevant to our specific research question. Therefore, I will further subset the dataframe to include only the columns of interest.
+
+In the following exploratory data analysis, I will examine both categorical and numerical variables. To facilitate this process, I have categorized the variables in the subsetted dataframe `subset_dat` into two vectors: `num_vars` for numerical variables and `cat_vars` for categorical variables. This categorization allows me to efficiently build a for-loop that processes each type of variable separately and generates the corresponding graphs.
+
+```{r}
+# Initialize vectors to hold variable names
+num_vars <- c()
+cat_vars <- c()
+
+# Loop through all columns of subset dataset except the two dependent variables to classify them as numeric or categorical
+for (var_name in colnames(subset_dat[, !colnames(subset_dat) %in% c("D36B", "DOV_D36_AMOUNT", "year")])) {
+  if (is.numeric(subset_dat[[var_name]])) {
+    num_vars <- c(num_vars, var_name) # Numerical variables are pasted in vector num_vars
+  } else if (is.factor(subset_dat[[var_name]]) || is.character(subset_dat[[var_name]])) {
+    cat_vars <- c(cat_vars, var_name) # Categorical variables are pasted in vector cat_vars
+  }
+}
+# Print the categorized vectors
+cat("Numerical variables:", paste(num_vars, collapse = ", "), "\n")
+cat("Categorical variables:", paste(cat_vars, collapse = ", "), "\n")
+```
+
+## Exploring missing data
+
+Since there are 17400 missing data in question D36B, I will proceed and explore if there is any notable patterns in the missing data. 
+
+```{r}
+# Subsetting missing data (answered NAs in Question D36B) into a separate dataset in order to explain any interesting patterns
+missing_dat <- subset_dat %>%
+  filter(year %in% c(2021:2023)) %>%
+  filter(D36B == "" | is.na(D36B))
+
+nrow(missing_dat)
+```
+For reference, below are the descriptions for each numerical variable code:
+
+- ppage: Age
+- pphi0018: Years lived in the United States (Q5)
+- pphhsize: Household Size
+- ppkid017: Presence of Household Members (Children aged 0-17)
+- ppt18ov: Presence of Household Members (Adults aged 18+)
+
+The results below indicate that the mean values across flag groups for various numerical variables did not differ significantly, except for the number of years lived in the United States. In 2022, respondents who did not answer the question about the likelihood of actively seeking another job or leaving their current job if their employer decreased their pay by 1% had, on average, lived in the United States for almost 11 fewer years compared to those whose employer hypothetically kept their pay the same for a year.
+
+```{r}
+# Exploring mean, median, and standard deviation of numerical variables in missing data
+for (i in 1:length(num_vars)) {
+  variable <- sym(num_vars[i])
+  
+  num_result0 <- missing_dat %>%
+    group_by(year, DOV_D36_AMOUNT) %>%
+    summarize(
+      !!paste0("mean_", num_vars[i]) := round(mean(!!variable, na.rm = TRUE),2),
+      !!paste0("median_", num_vars[i]) := round(median(!!variable, na.rm = TRUE),2),
+      !!paste0("sd_", num_vars[i]) := round(sd(!!variable, na.rm = TRUE),2),
+      .groups = "drop"
+    )
+  
+  # Print the summary statistics for each variable
+  set_flextable_defaults(
+  fonts_ignore=TRUE, font.size = 10, 
+  border.color = "gray", big.mark = "")
+  
+  print(flextable(num_result0))
+}
+```
+
+The racial distribution of respondents who did not answer the question about the likelihood of actively seeking another job or leaving their current job in response to a hypothetical pay decrease showed minimal variation across flag groups.
+
+```{r}
+# New facet label names for DOV_D36_AMOUNT variable
+# DOV_D36_AMOUNT.labs <- c("1%", "5%", "10%", "Constant")
+# names(DOV_D36_AMOUNT.labs) <- c("decreased your pay by 1 percent", 
+#                                   "decreased your pay by 5 percent",
+#                                   "decreased your pay by 10 percent",
+#                                   "kept your pay the same for a year")
+
+# Race/Ethnicity Distribution of missing data
+missing_dat %>% 
+  group_by(DOV_D36_AMOUNT, race_5cat) %>%
+  tally() %>%
+  group_by(DOV_D36_AMOUNT) %>%
+  mutate(proportion = n / sum(n)) %>%
+  ggplot(aes(x = factor(race_5cat), y = proportion, fill = factor(race_5cat))) +
+  facet_grid(~ DOV_D36_AMOUNT, scales = "free") + 
+  geom_col(stat = "identity", position = "dodge",
+           alpha = 0.6, color = "black") +
+  labs(title = str_wrap("Race/Ethnicity Distribution of Missing Data at Different Pay Decrease Levels", 60), 
+       x = "Race/Ethnicity", 
+       y = "Proportion", 
+       fill = "Race / Ethnicity") +
+  theme_bw() +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position="bottom") +
+  scale_x_discrete(labels = NULL) 
+```
+
+## Descriptive Statistics
+
+In the following section, I will be exploring the notable patterns of non-NA data.
+
+```{r}
+# Sub-setting non-NA values
+fin_dat <- subset_dat %>%
+  filter(!is.na(D36B) & D36B != "")
+
+# Saving fin_dat
+write.csv(fin_dat,"/Users/nataniawong/Desktop/IRLE/Report/cleaned_dat.csv", row.names = FALSE)
+```
+
+For reference, below are the descriptions for each numerical variable code:
+
+- ppage: Age
+- pphi0018: Years lived in the United States (Q5)
+- pphhsize: Household Size
+- ppkid017: Presence of Household Members (Children aged 0-17)
+- ppt18ov: Presence of Household Members (Adults aged 18+)
+
+The descriptive statistics table below shows that the people who are very likely to leave their job if their pay is kept the same for a year in 2021 is on average 13 years younger than those who are not at all likely leaving their job if their pay is decreased by 5 percent. Over the years, people who react more responsively (i.e. more likely to leave their job) to pay decrease are younger. 
+
+```{r}
+# Exploring mean, median, and standard deviation of numerical variables
+for (i in 1:length(num_vars)) {
+  variable <- sym(num_vars[i])
+  
+  num_result0 <- fin_dat %>%
+    group_by(year, D36B, DOV_D36_AMOUNT) %>%
+    summarize(
+      !!paste0("mean_", num_vars[i]) := round(mean(!!variable, na.rm = TRUE), 2),
+      !!paste0("median_", num_vars[i]) := round(median(!!variable, na.rm = TRUE), 2),
+      !!paste0("sd_", num_vars[i]) := round(sd(!!variable, na.rm = TRUE), 2),
+      .groups = "drop"
+    )
+  
+  # Print the summary statistics for each variable
+  print(num_result0)
+  }
+```
+
+After checking the unique values of flag `DOV_D36_AMOUNT` in 2021 data, there are only categories of "decreased your pay by 5 percent", "kept your pay the same for a year", and "decreased your pay by 10 percent". The option "decreased your pay by 1 percent" is added after year 2021. I was not able to verify this with the codebook since the description of flag `DOV_D36_AMOUNT` is missing from the codebook.
+
+The following graph and descriptive statistics table show that the racial distribution in the sample over the years did not vary as much. However, Black and Hispanics are more responsive the pay decrease, and are more likely to leave their job with a greater decrease in pay. Asians' responsiveness to pay decrease has increased from 2022 to 2023, where more people are more likely to leave their job in 2023 than in 2022. 
+
+The following graph shows the distribution of likelihood of Leaving job at different pay decrease levels for each race. 
+
+```{r}
+# New facet label names for DOV_D36_AMOUNT variable
+# DOV_D36_AMOUNT.labs <- c("1%", "5%", "10%", "Constant")
+# names(DOV_D36_AMOUNT.labs) <- c("decreased your pay by 1 percent", 
+#                                   "decreased your pay by 5 percent",
+#                                   "decreased your pay by 10 percent",
+#                                   "kept your pay the same for a year")
+
+# Race/Ethnicity Distribution by Likelihood of Leaving Job at Different Pay Decrease Levels
+race_df <- fin_dat %>% 
+  group_by(year, D36B, DOV_D36_AMOUNT, race_5cat) %>%
+  tally() %>%
+  mutate(prop = n / sum(n))
+
+print(race_df)
+  
+race_df %>%
+  filter(!is.na(race_5cat)) %>%
+  ggplot(aes(x = race_5cat, y = n, fill = D36B)) +
+  facet_grid(year ~ DOV_D36_AMOUNT, scales = "free") + 
+  geom_bar(stat = "identity", position = "fill",
+           alpha = 0.4, color = "black") +
+  labs(title = str_wrap("Race/Ethnicity Distribution by Likelihood of Leaving Job at Different Pay Decrease Levels", 60),
+       x = "Race/Ethnicity", 
+       y = "Proportion", 
+       fill = "Likelihood of Leaving Job") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  theme(legend.position="bottom")
+  #theme(axis.title.x=element_blank(),
+  #      axis.text.x=element_blank(),
+  #      axis.ticks.x = element_blank(),
+  #      legend.position="bottom") +
+  #scale_x_discrete(labels = NULL)
+```
+
+```{r}
+# New facet label names for DOV_D36_AMOUNT variable
+# DOV_D36_AMOUNT.labs <- c("1%", "5%", "10%", "Constant")
+# names(DOV_D36_AMOUNT.labs) <- c("decreased your pay by 1 percent", 
+#                                   "decreased your pay by 5 percent",
+#                                   "decreased your pay by 10 percent",
+#                                   "kept your pay the same for a year")
+  
+# Overlaid Density Plots of Likelihood of Leaving Job by Different Pay Decrease Levels for Age
+fin_dat %>%
+  filter(!is.na(ppage) & ppage != "") %>%
+  filter(!ppage >= 65) %>%
+  group_by(year, D36B, DOV_D36_AMOUNT) %>%
+  summarize(mean_age = round(mean(ppage), 2),
+            median_age = round(median(ppage), 2),
+            sd_age = round(sd(ppage), 2), 
+            .groups = "drop")
+  
+
+fin_dat %>%
+  filter(!is.na(ppage) & ppage != "") %>%
+  filter(!ppage >= 65) %>%
+  ggplot(aes(x = ppage, fill = D36B)) +
+  facet_grid(year ~ DOV_D36_AMOUNT, scales = "free") +
+  geom_density(stat = "density", position = "identity", 
+               alpha = 0.3, adjust = 1.2) +
+  labs(title = str_wrap("Distribution by Likelihood of Leaving Job at Different Pay Decrease Levels for Age", 60),
+         x = "Age",
+         y = "Density") +
+  theme_bw() +
+  theme(legend.position="bottom")
+```
+
+```{r}
+cat_vars
+# Plotting distribution of categorical variables against likelihood of leaving job at different pay decrease
+
+for (i in 1:length(cat_vars)) {
+  
+  # New facet label names for DOV_D36_AMOUNT variable
+  # DOV_D36_AMOUNT.labs <- c("1%", "5%", "10%", "Constant")
+  # names(DOV_D36_AMOUNT.labs) <- c("decreased your pay by 1 percent", 
+  #                                 "decreased your pay by 5 percent",
+  #                                 "decreased your pay by 10 percent",
+  #                                 "kept your pay the same for a year")
+  p <- fin_dat %>%
+    group_by(year, D36B, DOV_D36_AMOUNT, !!sym(cat_vars[i])) %>%
+    tally() %>%
+    filter(!is.na(!!sym(cat_vars[i])) & !!sym(cat_vars[i]) != "") %>%
+    ggplot(aes(x = factor(!!sym(cat_vars[i])), y = n, fill = D36B)) +
+    facet_grid(year ~ DOV_D36_AMOUNT, scales = "free") +
+    geom_bar(stat = "identity", position = "fill",
+             alpha = 0.4, color = "black") +
+    labs(title = str_wrap(paste("Distribution by Likelihood of Leaving Job at Different Pay Decrease Levels for", cat_vars[i]),60),
+         x = cat_vars[i],
+         y = "Proportion",
+         fill = cat_vars[i]) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 40, hjust=1))
+
+  print(p)
+}
+
+```
+
+- ppgender: Gender
+Both genders respond similarly to wage decreases, with no distinct differences.
+
+- ppethm: Race/Ethnicity
+Black and Hispanic individuals are more responsive to wage decreases compared to other groups, with increased responsiveness in 2022 and 2023 compared to 2021.
+
+- race_5cat: Race (5 categories)
+Black and Hispanic individuals are more likely to leave their jobs with greater pay decreases. Asians also showed increased responsiveness in 2023 compared to 2022.
+
+- ppeduc5: Education (5 categories)
+Individuals with some college or an associate's degree are most responsive to pay decreases, while those with a master's degree or higher are the least responsive.
+
+- ppmarit5: Marital Status
+Divorced and separated individuals are the most responsive to pay decreases.
+
+- pphispan: Spanish, Hispanic, or Latino Origin
+The responsiveness of Americans with Cuban origin increased significantly from 2022 to 2023, with 25% being very likely to leave their job with a 10% pay decrease in 2022, rising to 75% in 2023.
+
+- ppp20197: U.S. Citizenship Status (QEG22)
+Responsiveness to pay decreases fluctuates over the years. Non-citizens responded more drastically to pay decreases in 2021 and 2023, while citizens responded more in 2022.
+
+- ppemploy: Current Employment Status
+Full-time and part-time workers respond similarly to pay decreases across the years.
+
+- ppcm1301: Employer Type (GOVEMP1)
+NGO workers showed increased responsiveness in 2023 compared to 2022. Workers in family businesses were the least responsive across all years.
+
+- ppreg4: Region (4 Regions, Based on State of Residence)
+Residents of the South were most responsive to pay decreases in 2021 and 2022, with similar responsiveness patterns across regions.
+
+- pprent: Ownership Status of Living Quarters
+Respondents who occupied property without paying rent were the most responsive to a 10% pay decrease in 2022 but the least responsive in 2023. Those who owned their property showed consistent responsiveness, while renters responded more from 2021 to 2023.
+
+- ppfs1482: Credit Score Range
+Individuals with excellent or good credit scores were less responsive to pay decreases compared to those with fair, poor, or very poor scores. Lower credit scores correlated with higher responsiveness.
+
+- ppfs0596: Total Amount of Household Savings and Investments
+Household savings and investments have a negative relationship with responsiveness to pay decreases. Respondents with savings under $100,000 are more likely to leave their jobs with a 10% pay decrease.
+
+Note:
+
+- ppcm0160: Occupation (Detailed in Current or Main Job, Q26)
+With 43 unique values, the next step will be to either group and narrow down categories or focus on the top 5 sectors for easier visualization.
+
+- ind1: Industry (Broad Classification in Current or Main Job, IND1)
+This column is redundant with ppcm0160 and is being excluded for now.
+
+
+
+
